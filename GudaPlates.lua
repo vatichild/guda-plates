@@ -20,6 +20,9 @@ local REGION_ORDER = { "border", "glow", "name", "level", "levelicon", "raidicon
 local superwow_active = SpellInfo ~= nil -- SuperWoW detection
 local twthreat_active = UnitThreat ~= nil -- TurtleWoW TWThreat detection
 
+-- Cast tracking for non-SuperWoW
+local castTracker = {}
+
 -- Role setting: "TANK" or "DPS" (DPS includes healers)
 local playerRole = "DPS"
 
@@ -83,6 +86,14 @@ end
 
 local GudaPlates = CreateFrame("Frame", "GudaPlatesFrame", UIParent)
 GudaPlates:RegisterEvent("PLAYER_ENTERING_WORLD")
+GudaPlates:RegisterEvent("CHAT_MSG_SPELL_HOSTILEPLAYER_DAMAGE")
+GudaPlates:RegisterEvent("CHAT_MSG_SPELL_CREATURE_VS_CREATURE_DAMAGE")
+GudaPlates:RegisterEvent("CHAT_MSG_SPELL_CREATURE_VS_PARTY_DAMAGE")
+GudaPlates:RegisterEvent("CHAT_MSG_SPELL_HOSTILEPLAYER_BUFF")
+GudaPlates:RegisterEvent("CHAT_MSG_SPELL_CREATURE_VS_CREATURE_BUFF")
+GudaPlates:RegisterEvent("CHAT_MSG_SPELL_SELF_DAMAGE")
+GudaPlates:RegisterEvent("CHAT_MSG_SPELL_TRADESKILLS")
+GudaPlates:RegisterEvent("CHAT_MSG_SPELL_PERIODIC_CREATURE_DAMAGE")
 
 local function HandleNamePlate(frame)
     if not frame then return end
@@ -232,6 +243,35 @@ local function HandleNamePlate(frame)
     nameplate.healthtext:SetPoint("CENTER", nameplate.health, "CENTER", 0, 0)
     nameplate.healthtext:SetTextColor(1, 1, 1, 1)
     
+    -- Cast Bar below the name
+    nameplate.castbar = CreateFrame("StatusBar", nil, nameplate)
+    nameplate.castbar:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
+    nameplate.castbar:SetHeight(8)
+    nameplate.castbar:SetWidth(120)
+    nameplate.castbar:SetPoint("TOP", nameplate.name, "BOTTOM", 0, -2)
+    nameplate.castbar:SetStatusBarColor(1, 0.7, 0, 1)
+    nameplate.castbar:Hide()
+    
+    nameplate.castbar.bg = nameplate.castbar:CreateTexture(nil, "BACKGROUND")
+    nameplate.castbar.bg:SetTexture(0, 0, 0, 0.8)
+    nameplate.castbar.bg:SetAllPoints()
+    
+    nameplate.castbar.border = nameplate.castbar:CreateTexture(nil, "OVERLAY")
+    nameplate.castbar.border:SetTexture(0, 0, 0, 1)
+    nameplate.castbar.border:SetPoint("TOPLEFT", nameplate.castbar, "TOPLEFT", -1, 1)
+    nameplate.castbar.border:SetPoint("BOTTOMRIGHT", nameplate.castbar, "BOTTOMRIGHT", 1, -1)
+    nameplate.castbar.border:SetDrawLayer("BACKGROUND", -1)
+    
+    nameplate.castbar.text = nameplate.castbar:CreateFontString(nil, "OVERLAY")
+    nameplate.castbar.text:SetFont("Fonts\\ARIALN.TTF", 7, "OUTLINE")
+    nameplate.castbar.text:SetPoint("CENTER", nameplate.castbar, "CENTER", 0, 0)
+    nameplate.castbar.text:SetTextColor(1, 1, 1, 1)
+
+    nameplate.castbar.icon = nameplate.castbar:CreateTexture(nil, "OVERLAY")
+    nameplate.castbar.icon:SetWidth(12)
+    nameplate.castbar.icon:SetHeight(12)
+    nameplate.castbar.icon:SetPoint("RIGHT", nameplate.castbar, "LEFT", -2, 0)
+
     frame.nameplate = nameplate
     registry[frame] = nameplate
     
@@ -533,6 +573,40 @@ local function UpdateNamePlate(frame)
             end
         end
     end
+    
+    -- Update Cast Bar
+    local casting = nil
+    if superwow_active and hasValidGUID then
+        casting = SpellInfo(unitstr)
+    elseif plateName and castTracker[plateName] then
+        casting = castTracker[plateName]
+    end
+    
+    if casting and casting.spell then
+        local now = GetTime()
+        local start = casting.startTime
+        local duration = casting.duration
+        
+        if now < start + (duration / 1000) then
+            nameplate.castbar:SetMinMaxValues(0, duration)
+            nameplate.castbar:SetValue((now - start) * 1000)
+            nameplate.castbar.text:SetText(casting.spell)
+            if casting.icon then
+                nameplate.castbar.icon:SetTexture(casting.icon)
+                nameplate.castbar.icon:Show()
+            else
+                nameplate.castbar.icon:Hide()
+            end
+            nameplate.castbar:Show()
+        else
+            nameplate.castbar:Hide()
+            if not superwow_active and plateName then
+                castTracker[plateName] = nil
+            end
+        end
+    else
+        nameplate.castbar:Hide()
+    end
 end
 
 -- Check if ShaguTweaks libnameplate is available
@@ -651,6 +725,49 @@ GudaPlates:SetScript("OnEvent", function()
         end
         if superwow_active then
             Print("SuperWoW detected - GUID targeting enabled")
+        end
+    elseif not superwow_active and arg1 then
+        -- Fallback spell tracking using combat log messages
+        -- Pattern: "Unit begins to cast Spell." or "Unit begins to perform Spell."
+        local unit, spell = nil, nil
+        
+        -- Try "begins to cast"
+        for u, s in string.gfind(arg1, "(.+) begins to cast (.+)%.") do
+            unit, spell = u, s
+        end
+        
+        -- Try "begins to perform"
+        if not unit then
+            for u, s in string.gfind(arg1, "(.+) begins to perform (.+)%.") do
+                unit, spell = u, s
+            end
+        end
+        
+        if unit and spell then
+            -- We don't have duration easily in Vanilla without a database
+            -- But we can assume some default or use a small library if we had one
+            -- For now, let's use a 2s default or try to find it if we can
+            -- Many mob spells are around 2-3 seconds
+            local duration = 2000
+            
+            castTracker[unit] = {
+                spell = spell,
+                startTime = GetTime(),
+                duration = duration,
+                -- icon = nil -- We don't have icons easily without a DB
+            }
+        end
+        
+        -- Check for interrupts/failures
+        -- Pattern: "Unit's Spell is interrupted." or "Unit's Spell fails."
+        local interruptedUnit = nil
+        for u in string.gfind(arg1, "(.+)'s .+ is interrupted%.") do interruptedUnit = u end
+        if not interruptedUnit then
+            for u in string.gfind(arg1, "(.+)'s .+ fails%.") do interruptedUnit = u end
+        end
+        
+        if interruptedUnit and castTracker[interruptedUnit] then
+            castTracker[interruptedUnit] = nil
         end
     end
 end)
