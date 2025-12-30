@@ -16,7 +16,7 @@ local parentcount = 0
 local platecount = 0
 local registry = {}
 local REGION_ORDER = { "border", "glow", "name", "level", "levelicon", "raidicon" }
-local attackingPlayer = {} -- Track mobs attacking the player (by GUID if SuperWoW, else by name)
+-- Track combat state per nameplate frame to avoid issues with same-named mobs
 local superwow_active = SpellInfo ~= nil -- SuperWoW detection
 local twthreat_active = UnitThreat ~= nil -- TurtleWoW TWThreat detection
 
@@ -120,7 +120,10 @@ local function HandleNamePlate(frame)
     for i, region in ipairs(regions) do
         if region and region.GetObjectType then
             local rtype = region:GetObjectType()
-            if i == 6 then
+            if i == 2 then
+                -- 2nd region is glow texture
+                nameplate.original.glow = region
+            elseif i == 6 then
                 -- 6th region is raid icon
                 nameplate.original.raidicon = region
             elseif rtype == "FontString" then
@@ -326,6 +329,12 @@ local function UpdateNamePlate(frame)
     local isAttackingPlayer = false
     local hasValidGUID = unitstr and unitstr ~= ""
     
+    -- Check original glow texture (shows when having aggro in Vanilla)
+    local hasAggroGlow = false
+    if original.glow and original.glow.IsShown and original.glow:IsShown() then
+        hasAggroGlow = true
+    end
+
     -- SuperWoW method: use GUID to check mob's target directly (real-time, per-plate)
     if hasValidGUID then
         local mobTarget = unitstr .. "target"
@@ -346,26 +355,42 @@ local function UpdateNamePlate(frame)
     else
         -- Fallback: use name-based tracking (has same-name mob limitation)
         if plateName then
-            -- Check if we recently confirmed this mob was attacking us
-            if attackingPlayer[plateName] and GetTime() - attackingPlayer[plateName] < 5 then
+            -- Use original glow texture as primary indicator if available
+            -- Glow usually appears when unit is in combat and has threat
+            if hasAggroGlow then
+                isAttackingPlayer = true
+                nameplate.isAttackingPlayer = true
+                nameplate.lastAttackTime = GetTime()
+            end
+
+            -- Check if this specific plate was recently confirmed attacking
+            if not isAttackingPlayer and nameplate.isAttackingPlayer and nameplate.lastAttackTime and (GetTime() - nameplate.lastAttackTime < 5) then
                 isAttackingPlayer = true
             end
             
             -- If we're targeting this mob, verify and update tracking
             if UnitExists("target") and UnitName("target") == plateName then
-                if UnitExists("targettarget") and UnitIsUnit("targettarget", "player") then
-                    attackingPlayer[plateName] = GetTime()
-                    isAttackingPlayer = true
-                elseif UnitExists("targettarget") and not UnitIsUnit("targettarget", "player") then
-                    -- Mob is targeting someone else, clear tracking
-                    attackingPlayer[plateName] = nil
-                    isAttackingPlayer = false
+                -- Check if target is actually this nameplate (alpha check is a common vanilla trick)
+                -- Usually target nameplate has alpha 1.0, others might be 0.x
+                -- Note: GetAlpha might be affected by UI modifications, but 1.0 is default for target
+                if frame:GetAlpha() > 0.9 then
+                    if UnitExists("targettarget") and UnitIsUnit("targettarget", "player") then
+                        nameplate.isAttackingPlayer = true
+                        nameplate.lastAttackTime = GetTime()
+                        isAttackingPlayer = true
+                    elseif UnitExists("targettarget") and not UnitIsUnit("targettarget", "player") then
+                        -- Mob is targeting someone else, clear tracking
+                        nameplate.isAttackingPlayer = false
+                        nameplate.lastAttackTime = nil
+                        isAttackingPlayer = false
+                    end
                 end
             end
             
             -- Expire old entries after 5 seconds without refresh
-            if attackingPlayer[plateName] and GetTime() - attackingPlayer[plateName] > 5 then
-                attackingPlayer[plateName] = nil
+            if nameplate.isAttackingPlayer and nameplate.lastAttackTime and (GetTime() - nameplate.lastAttackTime > 5) then
+                nameplate.isAttackingPlayer = false
+                nameplate.lastAttackTime = nil
                 isAttackingPlayer = false
             end
         end
@@ -401,8 +426,8 @@ local function UpdateNamePlate(frame)
             local mobTarget = unitstr .. "target"
             mobInCombat = UnitExists(mobTarget)
         else
-            -- Fallback: assume in combat if attacking player or we have threat data
-            mobInCombat = isAttackingPlayer or (twthreat_active and threatPct > 0)
+            -- Fallback: assume in combat if attacking player or we have threat data or has glow
+            mobInCombat = isAttackingPlayer or (twthreat_active and threatPct > 0) or hasAggroGlow
         end
         
         if not mobInCombat then
