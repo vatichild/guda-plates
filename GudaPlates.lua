@@ -579,7 +579,12 @@ local function UpdateNamePlate(frame)
     if superwow_active and hasValidGUID then
         casting = SpellInfo(unitstr)
     elseif plateName and castTracker[plateName] then
-        casting = castTracker[plateName]
+        -- Fallback: only show castbar if this is the current target
+        -- In Vanilla, we can't reliably know WHICH same-named mob is casting
+        -- unless it's our target.
+        if isTarget then
+            casting = castTracker[plateName]
+        end
     end
     
     if casting and casting.spell then
