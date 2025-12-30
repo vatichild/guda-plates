@@ -32,6 +32,7 @@ local castTracker = {}
 
 -- Role setting: "TANK" or "DPS" (DPS includes healers)
 local playerRole = "DPS"
+local minimapAngle = 220
 
 -- Nameplate overlap setting: true = overlapping, false = stacking (default)
 local nameplateOverlap = false
@@ -981,6 +982,7 @@ local function SaveSettings()
     GudaPlatesDB.playerRole = playerRole
     GudaPlatesDB.THREAT_COLORS = THREAT_COLORS
     GudaPlatesDB.nameplateOverlap = nameplateOverlap
+    GudaPlatesDB.minimapAngle = minimapAngle
 end
 
 local function LoadSettings()
@@ -989,6 +991,9 @@ local function LoadSettings()
     end
     if GudaPlatesDB.nameplateOverlap ~= nil then
         nameplateOverlap = GudaPlatesDB.nameplateOverlap
+    end
+    if GudaPlatesDB.minimapAngle then
+        minimapAngle = GudaPlatesDB.minimapAngle
     end
     if GudaPlatesDB.THREAT_COLORS then
         for role, colors in pairs(GudaPlatesDB.THREAT_COLORS) do
@@ -1007,7 +1012,10 @@ end
 local minimapButton = CreateFrame("Button", "GudaPlatesMinimapButton", Minimap)
 minimapButton:SetWidth(32)
 minimapButton:SetHeight(32)
-minimapButton:SetFrameStrata("MEDIUM")
+minimapButton:SetFrameStrata("LOW")
+minimapButton:SetToplevel(true)
+minimapButton:SetMovable(true)
+minimapButton:EnableMouse(true)
 minimapButton:SetPoint("TOPLEFT", Minimap, "TOPLEFT", 0, 0)
 minimapButton:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight")
 
@@ -1015,57 +1023,70 @@ local minimapIcon = minimapButton:CreateTexture(nil, "BACKGROUND")
 minimapIcon:SetTexture("Interface\\Icons\\Spell_Nature_WispSplode")
 minimapIcon:SetWidth(20)
 minimapIcon:SetHeight(20)
+minimapIcon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
 minimapIcon:SetPoint("CENTER", minimapButton, "CENTER", 0, 0)
 
 local minimapBorder = minimapButton:CreateTexture(nil, "OVERLAY")
 minimapBorder:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
-minimapBorder:SetWidth(56)
-minimapBorder:SetHeight(56)
-minimapBorder:SetPoint("TOPLEFT", minimapButton, "TOPLEFT", -5, 5)
+minimapBorder:SetWidth(52)
+minimapBorder:SetHeight(52)
+minimapBorder:SetPoint("CENTER", minimapButton, "CENTER", 10, -10)
 
 -- Minimap button dragging
-local minimapAngle = 220
 local function UpdateMinimapButtonPosition()
     local rad = math.rad(minimapAngle)
     local x = math.cos(rad) * 80
     local y = math.sin(rad) * 80
-    minimapButton:SetPoint("CENTER", Minimap, "CENTER", x, y)
+    minimapButton:SetPoint("TOPLEFT", Minimap, "TOPLEFT", 52 - x, y - 52)
 end
 UpdateMinimapButtonPosition()
 
-minimapButton:RegisterForDrag("LeftButton")
+minimapButton:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+minimapButton:RegisterForDrag("LeftButton", "RightButton")
 minimapButton:SetScript("OnDragStart", function()
     this.dragging = true
+    this:LockHighlight()
 end)
 
 minimapButton:SetScript("OnDragStop", function()
     this.dragging = false
+    this:UnlockHighlight()
+    SaveSettings()
 end)
 
 minimapButton:SetScript("OnUpdate", function()
     if this.dragging then
-        local mx, my = Minimap:GetCenter()
-        local cx, cy = GetCursorPosition()
-        local scale = UIParent:GetEffectiveScale()
-        cx, cy = cx / scale, cy / scale
-        minimapAngle = math.deg(math.atan2(cy - my, cx - mx))
+        local xpos, ypos = GetCursorPosition()
+        local xmin, ymin = Minimap:GetLeft() or 400, Minimap:GetBottom() or 400
+        local mscale = Minimap:GetEffectiveScale()
+        
+        -- TrinketMenu logic:
+        -- xpos = xmin - xpos / mscale + 70
+        -- ypos = ypos / mscale - ymin - 70
+        -- angle = math.deg(math.atan2(ypos, xpos))
+        
+        local dx = xmin - xpos / mscale + 70
+        local dy = ypos / mscale - ymin - 70
+        minimapAngle = math.deg(math.atan2(dy, dx))
         UpdateMinimapButtonPosition()
     end
 end)
 
 minimapButton:SetScript("OnClick", function()
-    if GudaPlatesOptionsFrame:IsShown() then
-        GudaPlatesOptionsFrame:Hide()
-    else
-        GudaPlatesOptionsFrame:Show()
+    if arg1 == "RightButton" or IsControlKeyDown() then
+        if GudaPlatesOptionsFrame:IsShown() then
+            GudaPlatesOptionsFrame:Hide()
+        else
+            GudaPlatesOptionsFrame:Show()
+        end
     end
 end)
 
 minimapButton:SetScript("OnEnter", function()
     GameTooltip:SetOwner(this, "ANCHOR_LEFT")
     GameTooltip:AddLine("GudaPlates")
-    GameTooltip:AddLine("Click to open settings", 1, 1, 1)
-    GameTooltip:AddLine("Drag to move button", 0.7, 0.7, 0.7)
+    GameTooltip:AddLine("Left-Drag to move button", 1, 1, 1)
+    GameTooltip:AddLine("Right-Click or Ctrl-Left-Click for settings", 0.7, 0.7, 0.7)
     GameTooltip:Show()
 end)
 
@@ -1281,6 +1302,7 @@ local loadFrame = CreateFrame("Frame")
 loadFrame:RegisterEvent("VARIABLES_LOADED")
 loadFrame:SetScript("OnEvent", function()
     LoadSettings()
+    UpdateMinimapButtonPosition()
     Print("Settings loaded.")
 end)
 
