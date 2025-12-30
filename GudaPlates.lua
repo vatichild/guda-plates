@@ -174,13 +174,15 @@ local function HandleNamePlate(frame)
     nameplate.health.border:SetPoint("BOTTOMRIGHT", nameplate.health, "BOTTOMRIGHT", 1, -1)
     nameplate.health.border:SetDrawLayer("BACKGROUND", -1)
     
-    -- Create our own raid icon (don't rely on original)
-    nameplate.raidicon = nameplate.health:CreateTexture(nil, "OVERLAY")
-    nameplate.raidicon:SetTexture("Interface\\TargetingFrame\\UI-RaidTargetingIcons")
-    nameplate.raidicon:SetPoint("RIGHT", nameplate.health, "LEFT", -5, 0)
-    nameplate.raidicon:SetWidth(24)
-    nameplate.raidicon:SetHeight(24)
-    nameplate.raidicon:Hide()
+    -- Reparent original raid icon to our health bar
+    if nameplate.original.raidicon then
+        nameplate.original.raidicon:SetParent(nameplate.health)
+        nameplate.original.raidicon:ClearAllPoints()
+        nameplate.original.raidicon:SetPoint("RIGHT", nameplate.health, "LEFT", -5, 0)
+        nameplate.original.raidicon:SetWidth(24)
+        nameplate.original.raidicon:SetHeight(24)
+        nameplate.original.raidicon:SetDrawLayer("OVERLAY")
+    end
     
     -- Target highlight borders (left and right)
     nameplate.health.targetLeft = nameplate.health:CreateTexture(nil, "OVERLAY")
@@ -234,12 +236,12 @@ local function UpdateNamePlate(frame)
     original.healthbar:SetStatusBarTexture("")
     original.healthbar:SetAlpha(0)
     
-    -- Hide regions on main frame (except raid icon)
-    for _, region in ipairs({frame:GetRegions()}) do
+    -- Hide regions on main frame (but NOT the raid icon - it's reparented to us)
+    for i, region in ipairs({frame:GetRegions()}) do
         if region and region.GetObjectType then
             local otype = region:GetObjectType()
             if otype == "Texture" then
-                -- Skip raid icon - we want to keep it visible
+                -- Skip raid icon (6th region) - we reparented it
                 if region ~= nameplate.original.raidicon then
                     region:SetTexture("")
                     region:SetTexCoord(0, 0, 0, 0)
@@ -289,16 +291,6 @@ local function UpdateNamePlate(frame)
         if levelText then
             nameplate.level:SetText(levelText)
         end
-    end
-    
-    -- Update raid icon from original
-    if nameplate.original.raidicon and nameplate.original.raidicon:IsShown() then
-        -- Copy texcoords from original raid icon to show correct icon
-        local left, right, top, bottom = nameplate.original.raidicon:GetTexCoord()
-        nameplate.raidicon:SetTexCoord(left, right, top, bottom)
-        nameplate.raidicon:Show()
-    else
-        nameplate.raidicon:Hide()
     end
     
     -- Plater-style colors with threat support
