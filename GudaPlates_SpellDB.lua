@@ -460,6 +460,15 @@ end
 function GudaPlates_SpellDB:ScanDebuff(unit, index)
 	if not self.scanner then self:InitScanner() end
 
+	-- Get the debuff texture first for cache lookup
+	local texture = UnitDebuff(unit, index)
+
+	-- Try texture cache first (fastest, works with GUIDs)
+	if texture and self.textureToSpell and self.textureToSpell[texture] then
+		DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[ScanDebuff]|r Cache hit: " .. texture .. " -> " .. self.textureToSpell[texture])
+		return self.textureToSpell[texture]
+	end
+
 	-- SetUnitDebuff doesn't work with GUID strings, only standard unit IDs
 	-- Convert GUID to "target" if it matches the current target
 	local scanUnit = unit
@@ -470,19 +479,12 @@ function GudaPlates_SpellDB:ScanDebuff(unit, index)
 			if targetGUID and targetGUID == unit then
 				scanUnit = "target"
 			else
-				-- Can't scan this GUID directly, try texture cache
-				local texture = UnitDebuff(unit, index)
-				if texture and self.textureToSpell[texture] then
-					return self.textureToSpell[texture]
-				end
+				-- Can't scan this GUID, no cache hit
+				DEFAULT_CHAT_FRAME:AddMessage("|cffff0000[ScanDebuff]|r GUID mismatch, no cache for: " .. tostring(texture))
 				return nil
 			end
 		else
-			-- No target, can't scan GUID
-			local texture = UnitDebuff(unit, index)
-			if texture and self.textureToSpell[texture] then
-				return self.textureToSpell[texture]
-			end
+			DEFAULT_CHAT_FRAME:AddMessage("|cffff0000[ScanDebuff]|r No target, no cache for: " .. tostring(texture))
 			return nil
 		end
 	end
@@ -493,12 +495,10 @@ function GudaPlates_SpellDB:ScanDebuff(unit, index)
 	local textLeft = getglobal("GudaPlatesDebuffScannerTextLeft1")
 	if textLeft then
 		local effect = textLeft:GetText()
-		-- Cache texture -> spell mapping for future GUID lookups
-		if effect and effect ~= "" then
-			local texture = UnitDebuff(scanUnit, index)
-			if texture then
-				self.textureToSpell[texture] = effect
-			end
+		DEFAULT_CHAT_FRAME:AddMessage("|cffff00ff[ScanDebuff]|r Tooltip: " .. tostring(effect))
+		-- Cache texture -> spell mapping for future lookups
+		if effect and effect ~= "" and texture then
+			self.textureToSpell[texture] = effect
 		end
 		return effect
 	end
@@ -506,10 +506,30 @@ function GudaPlates_SpellDB:ScanDebuff(unit, index)
 	return nil
 end
 
--- Get rank from action bar slot tooltip
+-- Get spell name and rank from action bar slot by matching texture to spellbook
 function GudaPlates_SpellDB:ScanAction(slot)
-	if not self.scanner then self:InitScanner() end
+	local actionTexture = GetActionTexture(slot)
+	if not actionTexture then return nil, nil end
 
+	-- Search through spellbook to find matching texture
+	local bookTypes = { "spell", "BOOKTYPE_SPELL" }
+
+	-- Get number of spells
+	local i = 1
+	while true do
+		local spellName, spellRank = GetSpellName(i, "spell")
+		if not spellName then break end
+
+		local spellTexture = GetSpellTexture(i, "spell")
+		if spellTexture and spellTexture == actionTexture then
+			DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[ScanAction]|r Found spell: " .. spellName .. " (" .. tostring(spellRank) .. ") texture match!")
+			return spellName, spellRank
+		end
+		i = i + 1
+	end
+
+	-- If not found in spellbook, try tooltip as fallback
+	if not self.scanner then self:InitScanner() end
 	self.scanner:ClearLines()
 	self.scanner:SetAction(slot)
 
@@ -519,6 +539,7 @@ function GudaPlates_SpellDB:ScanAction(slot)
 	local effect = textLeft and textLeft:GetText() or nil
 	local rank = textRight and textRight:GetText() or nil
 
+	DEFAULT_CHAT_FRAME:AddMessage("|cffff00ff[ScanAction]|r Fallback tooltip: effect='" .. tostring(effect) .. "' rank='" .. tostring(rank) .. "'")
 	return effect, rank
 end
 

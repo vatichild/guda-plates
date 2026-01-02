@@ -75,6 +75,25 @@ local THREAT_COLORS = {
 -- Load spell database if available
 local SpellDB = GudaPlates_SpellDB
 
+-- Verify SpellDB loaded correctly
+if SpellDB then
+    DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[GudaPlates]|r SpellDB loaded successfully")
+    if SpellDB.DEBUFFS then
+        local count = 0
+        for _ in pairs(SpellDB.DEBUFFS) do count = count + 1 end
+        DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[GudaPlates]|r DEBUFFS table has " .. count .. " entries")
+    else
+        DEFAULT_CHAT_FRAME:AddMessage("|cffff0000[GudaPlates]|r ERROR: SpellDB.DEBUFFS is nil!")
+    end
+    if SpellDB.objects then
+        DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[GudaPlates]|r SpellDB.objects table exists")
+    else
+        DEFAULT_CHAT_FRAME:AddMessage("|cffff0000[GudaPlates]|r ERROR: SpellDB.objects is nil!")
+    end
+else
+    DEFAULT_CHAT_FRAME:AddMessage("|cffff0000[GudaPlates]|r ERROR: SpellDB (GudaPlates_SpellDB) failed to load!")
+end
+
 -- ============================================
 -- SPELL CAST HOOKS (ShaguTweaks-style)
 -- Detects when player casts spells to track debuff durations with correct rank
@@ -182,17 +201,25 @@ UseAction = function(slot, checkCursor, onSelf)
 		-- GetActionText returns macro name, so nil means not a macro
 		-- GetActionTexture returns nil if slot is empty
 		-- Skip if it's a macro or empty slot
-		if GetActionText(slot) == nil and GetActionTexture(slot) ~= nil then
+		local actionTexture = GetActionTexture(slot)
+		if GetActionText(slot) == nil and actionTexture ~= nil then
 			-- Use tooltip scanning to get spell name and rank
 			local spellName, rank = SpellDB:ScanAction(slot)
 			DEFAULT_CHAT_FRAME:AddMessage("|cff00ffff[GudaPlates]|r UseAction: slot=" .. tostring(slot) .. " spell=" .. tostring(spellName) .. " rank=" .. tostring(rank))
-			if spellName and UnitExists("target") then
-				local targetName = UnitName("target")
-				local targetLevel = UnitLevel("target") or 0
-				local duration = SpellDB:GetDuration(spellName, rank)
-				DEFAULT_CHAT_FRAME:AddMessage("|cff00ffff[GudaPlates]|r UseAction: target=" .. tostring(targetName) .. " duration=" .. tostring(duration))
-				if duration and duration > 0 then
-					SpellDB:AddPending(targetName, targetLevel, spellName, duration)
+			if spellName then
+				-- Cache texture -> spell name for debuff display lookup
+				if SpellDB.textureToSpell then
+					SpellDB.textureToSpell[actionTexture] = spellName
+					DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[GudaPlates]|r Cached texture: " .. actionTexture .. " -> " .. spellName)
+				end
+				if UnitExists("target") then
+					local targetName = UnitName("target")
+					local targetLevel = UnitLevel("target") or 0
+					local duration = SpellDB:GetDuration(spellName, rank)
+					DEFAULT_CHAT_FRAME:AddMessage("|cff00ffff[GudaPlates]|r UseAction: target=" .. tostring(targetName) .. " duration=" .. tostring(duration))
+					if duration and duration > 0 then
+						SpellDB:AddPending(targetName, targetLevel, spellName, duration)
+					end
 				end
 			end
 		end
@@ -1114,13 +1141,17 @@ local function UpdateNamePlate(frame)
                     effect = SpellDB.textureToSpell[texture]
                 end
 
-                DEFAULT_CHAT_FRAME:AddMessage("|cffff00ff[Display]|r unitstr=" .. tostring(unitstr) .. " plateName=" .. tostring(plateName) .. " effect=" .. tostring(effect))
+                -- Debug: show what we're looking for
+                --DEFAULT_CHAT_FRAME:AddMessage("|cffff00ff[Display]|r Looking for: effect=" .. tostring(effect) .. " unitstr=" .. tostring(unitstr) .. " plateName=" .. tostring(plateName))
 
                 -- Try to get tracked data from SpellDB.objects
                 -- First try by GUID (unitstr), then by name (plateName)
                 if effect and effect ~= "" then
                     local unitlevel = UnitLevel(unitstr) or 0
                     local data = nil
+
+                    -- Debug: show what's in objects
+                    DEFAULT_CHAT_FRAME:AddMessage("|cffff00ff[Display]|r objects[unitstr]=" .. tostring(SpellDB.objects[unitstr] ~= nil) .. " objects[plateName]=" .. tostring(SpellDB.objects[plateName] ~= nil))
 
                     -- Try GUID lookup first (most accurate for multiple mobs with same name)
                     if SpellDB.objects[unitstr] then
@@ -1554,9 +1585,18 @@ GudaPlates:SetScript("OnEvent", function()
             -- Pattern: "Unit is afflicted by Spell."
             local unit, effect = cmatch(arg1, AURAADDEDOTHERHARMFUL or "%s is afflicted by %s.")
             if unit and effect then
-                local unitlevel = UnitName("target") == unit and UnitLevel("target") or 0
-                if not SpellDB.objects[unit] or not SpellDB.objects[unit][unitlevel] or not SpellDB.objects[unit][unitlevel][effect] then
-                    SpellDB:AddEffect(unit, unitlevel, effect)
+                DEFAULT_CHAT_FRAME:AddMessage("|cff00ffff[GudaPlates]|r Combat log: " .. unit .. " afflicted by " .. effect)
+                -- First try to persist pending spell (this is the accurate one with rank info)
+                if SpellDB.pending[3] == effect then
+                    DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[GudaPlates]|r Persisting pending spell: " .. effect)
+                    SpellDB:PersistPending(effect)
+                else
+                    -- Fallback: add from combat log (no rank info, uses default duration)
+                    local unitlevel = UnitName("target") == unit and UnitLevel("target") or 0
+                    if not SpellDB.objects[unit] or not SpellDB.objects[unit][unitlevel] or not SpellDB.objects[unit][unitlevel][effect] then
+                        local dbDuration = SpellDB:GetDuration(effect, 0)
+                        SpellDB:AddEffect(unit, unitlevel, effect, dbDuration)
+                    end
                 end
             end
         end
@@ -2378,16 +2418,11 @@ loadFrame:SetScript("OnEvent", function()
     -- Test the spell database
     if SpellDB then
         Print("✓ Spell database loaded successfully")
-        Print("  Functions available: " .. tostring(SpellDB.GetDurationFromTexture ~= nil))
-
-        -- Quick test
-        local testTex = "Interface\\Icons\\Ability_Gouge"
-        local duration = SpellDB:GetDurationFromTexture(testTex)
-        Print("  Test - " .. testTex .. " -> " .. tostring(duration) .. "s")
+        -- Quick test with Rend
+        local duration = SpellDB:GetDuration("Rend", 2)
+        Print("  Test - Rend Rank 2 -> " .. tostring(duration) .. "s (expected: 12)")
     else
         Print("✗ ERROR: Spell database not loaded!")
-        Print("  Check that GudaPlates_SpellDB.lua exists in AddOns folder")
-        Print("  Check .toc file includes: GudaPlates_SpellDB.lua")
     end
 end)
 
