@@ -657,7 +657,7 @@ local function HandleNamePlate(frame)
     frame.nameplate = nameplate
     registry[frame] = nameplate
 
-    Print("Hooked: " .. platename)
+    --Print("Hooked: " .. platename)
 end
 
 
