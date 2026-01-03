@@ -76,22 +76,8 @@ local THREAT_COLORS = {
 local SpellDB = GudaPlates_SpellDB
 
 -- Verify SpellDB loaded correctly
-if SpellDB then
-    DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[GudaPlates]|r SpellDB loaded successfully")
-    if SpellDB.DEBUFFS then
-        local count = 0
-        for _ in pairs(SpellDB.DEBUFFS) do count = count + 1 end
-        DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[GudaPlates]|r DEBUFFS table has " .. count .. " entries")
-    else
-        DEFAULT_CHAT_FRAME:AddMessage("|cffff0000[GudaPlates]|r ERROR: SpellDB.DEBUFFS is nil!")
-    end
-    if SpellDB.objects then
-        DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[GudaPlates]|r SpellDB.objects table exists")
-    else
-        DEFAULT_CHAT_FRAME:AddMessage("|cffff0000[GudaPlates]|r ERROR: SpellDB.objects is nil!")
-    end
-else
-    DEFAULT_CHAT_FRAME:AddMessage("|cffff0000[GudaPlates]|r ERROR: SpellDB (GudaPlates_SpellDB) failed to load!")
+if not SpellDB then
+    DEFAULT_CHAT_FRAME:AddMessage("|cffff0000[GudaPlates]|r ERROR: SpellDB failed to load!")
 end
 
 -- ============================================
@@ -145,78 +131,53 @@ end
 -- Hook original CastSpell (ShaguPlates-style)
 local Original_CastSpell = CastSpell
 CastSpell = function(spellId, bookType)
-	DEFAULT_CHAT_FRAME:AddMessage("|cff00ffff[GudaPlates]|r CastSpell hook: spellId=" .. tostring(spellId) .. " bookType=" .. tostring(bookType))
-	-- Get spell info before casting
 	if SpellDB and spellId and bookType then
 		local spellName, rank = GetSpellName(spellId, bookType)
-		DEFAULT_CHAT_FRAME:AddMessage("|cff00ffff[GudaPlates]|r CastSpell: spellName=" .. tostring(spellName) .. " rank=" .. tostring(rank))
 		if spellName and UnitExists("target") and UnitCanAttack("player", "target") then
 			local targetName = UnitName("target")
 			local targetLevel = UnitLevel("target") or 0
 			local duration = SpellDB:GetDuration(spellName, rank)
-			DEFAULT_CHAT_FRAME:AddMessage("|cff00ffff[GudaPlates]|r CastSpell: target=" .. tostring(targetName) .. " duration=" .. tostring(duration))
 			if duration and duration > 0 then
 				SpellDB:AddPending(targetName, targetLevel, spellName, duration)
-			else
-				DEFAULT_CHAT_FRAME:AddMessage("|cffff0000[GudaPlates]|r CastSpell: duration is 0 or nil, not adding pending")
 			end
-		else
-			DEFAULT_CHAT_FRAME:AddMessage("|cffff0000[GudaPlates]|r CastSpell: no valid target or spell")
 		end
-	else
-		DEFAULT_CHAT_FRAME:AddMessage("|cffff0000[GudaPlates]|r CastSpell: SpellDB or spellId/bookType is nil")
 	end
-	-- Call original
 	return Original_CastSpell(spellId, bookType)
 end
 
 -- Hook original CastSpellByName (ShaguPlates-style)
 local Original_CastSpellByName = CastSpellByName
 CastSpellByName = function(spellString, onSelf)
-	DEFAULT_CHAT_FRAME:AddMessage("|cff00ffff[GudaPlates]|r CastSpellByName hook: spellString=" .. tostring(spellString))
-	-- Parse spell name and rank
 	if SpellDB and spellString then
 		local spellName, rank = ParseSpellName(spellString)
-		DEFAULT_CHAT_FRAME:AddMessage("|cff00ffff[GudaPlates]|r CastSpellByName: parsed spellName=" .. tostring(spellName) .. " rank=" .. tostring(rank))
 		if spellName and UnitExists("target") and UnitCanAttack("player", "target") then
 			local targetName = UnitName("target")
 			local targetLevel = UnitLevel("target") or 0
 			local duration = SpellDB:GetDuration(spellName, rank)
-			DEFAULT_CHAT_FRAME:AddMessage("|cff00ffff[GudaPlates]|r CastSpellByName: target=" .. tostring(targetName) .. " duration=" .. tostring(duration))
 			if duration and duration > 0 then
 				SpellDB:AddPending(targetName, targetLevel, spellName, duration)
 			end
 		end
 	end
-	-- Call original
 	return Original_CastSpellByName(spellString, onSelf)
 end
 
 -- Hook UseAction (for action bar clicks) (ShaguPlates-style)
 local Original_UseAction = UseAction
 UseAction = function(slot, checkCursor, onSelf)
-	-- Try to get spell info from action bar slot
-	-- We're a pre-hook, so we check BEFORE the action is used
 	if SpellDB and slot then
-		-- GetActionText returns macro name, so nil means not a macro
-		-- GetActionTexture returns nil if slot is empty
-		-- Skip if it's a macro or empty slot
 		local actionTexture = GetActionTexture(slot)
 		if GetActionText(slot) == nil and actionTexture ~= nil then
-			-- Use tooltip scanning to get spell name and rank
 			local spellName, rank = SpellDB:ScanAction(slot)
-			DEFAULT_CHAT_FRAME:AddMessage("|cff00ffff[GudaPlates]|r UseAction: slot=" .. tostring(slot) .. " spell=" .. tostring(spellName) .. " rank=" .. tostring(rank))
 			if spellName then
 				-- Cache texture -> spell name for debuff display lookup
 				if SpellDB.textureToSpell then
 					SpellDB.textureToSpell[actionTexture] = spellName
-					DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[GudaPlates]|r Cached texture: " .. actionTexture .. " -> " .. spellName)
 				end
 				if UnitExists("target") then
 					local targetName = UnitName("target")
 					local targetLevel = UnitLevel("target") or 0
 					local duration = SpellDB:GetDuration(spellName, rank)
-					DEFAULT_CHAT_FRAME:AddMessage("|cff00ffff[GudaPlates]|r UseAction: target=" .. tostring(targetName) .. " duration=" .. tostring(duration))
 					if duration and duration > 0 then
 						SpellDB:AddPending(targetName, targetLevel, spellName, duration)
 					end
@@ -224,7 +185,6 @@ UseAction = function(slot, checkCursor, onSelf)
 			end
 		end
 	end
-	-- Call original
 	return Original_UseAction(slot, checkCursor, onSelf)
 end
 
@@ -1141,21 +1101,14 @@ local function UpdateNamePlate(frame)
                     effect = SpellDB.textureToSpell[texture]
                 end
 
-                -- Debug: show what we're looking for
-                --DEFAULT_CHAT_FRAME:AddMessage("|cffff00ff[Display]|r Looking for: effect=" .. tostring(effect) .. " unitstr=" .. tostring(unitstr) .. " plateName=" .. tostring(plateName))
-
                 -- Try to get tracked data from SpellDB.objects
                 -- First try by GUID (unitstr), then by name (plateName)
                 if effect and effect ~= "" then
                     local unitlevel = UnitLevel(unitstr) or 0
                     local data = nil
 
-                    -- Debug: show what's in objects
-                    DEFAULT_CHAT_FRAME:AddMessage("|cffff00ff[Display]|r objects[unitstr]=" .. tostring(SpellDB.objects[unitstr] ~= nil) .. " objects[plateName]=" .. tostring(SpellDB.objects[plateName] ~= nil))
-
                     -- Try GUID lookup first (most accurate for multiple mobs with same name)
                     if SpellDB.objects[unitstr] then
-                        DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[Display]|r Found objects by GUID")
                         if SpellDB.objects[unitstr][unitlevel] and SpellDB.objects[unitstr][unitlevel][effect] then
                             data = SpellDB.objects[unitstr][unitlevel][effect]
                         elseif SpellDB.objects[unitstr][0] and SpellDB.objects[unitstr][0][effect] then
@@ -1172,7 +1125,6 @@ local function UpdateNamePlate(frame)
 
                     -- Fallback to name lookup
                     if not data and plateName and SpellDB.objects[plateName] then
-                        DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[Display]|r Fallback to name lookup: " .. plateName)
                         if SpellDB.objects[plateName][unitlevel] and SpellDB.objects[plateName][unitlevel][effect] then
                             data = SpellDB.objects[plateName][unitlevel][effect]
                         elseif SpellDB.objects[plateName][0] and SpellDB.objects[plateName][0][effect] then
@@ -1188,7 +1140,6 @@ local function UpdateNamePlate(frame)
                     end
 
                     if data and data.start and data.duration then
-                        DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[Display]|r data.duration=" .. data.duration .. " timeleft=" .. (data.duration + data.start - now))
                         if data.start + data.duration > now then
                             duration = data.duration
                             timeleft = data.duration + data.start - now
@@ -1545,7 +1496,6 @@ GudaPlates:SetScript("OnEvent", function()
     -- ShaguPlates-style event handlers
     elseif event == "SPELLCAST_STOP" then
         -- Persist pending spell when cast finishes
-        DEFAULT_CHAT_FRAME:AddMessage("|cff00ffff[GudaPlates]|r SPELLCAST_STOP event fired")
         if SpellDB then
             SpellDB:PersistPending()
         end
@@ -1585,10 +1535,8 @@ GudaPlates:SetScript("OnEvent", function()
             -- Pattern: "Unit is afflicted by Spell."
             local unit, effect = cmatch(arg1, AURAADDEDOTHERHARMFUL or "%s is afflicted by %s.")
             if unit and effect then
-                DEFAULT_CHAT_FRAME:AddMessage("|cff00ffff[GudaPlates]|r Combat log: " .. unit .. " afflicted by " .. effect)
                 -- First try to persist pending spell (this is the accurate one with rank info)
                 if SpellDB.pending[3] == effect then
-                    DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[GudaPlates]|r Persisting pending spell: " .. effect)
                     SpellDB:PersistPending(effect)
                 else
                     -- Fallback: add from combat log (no rank info, uses default duration)

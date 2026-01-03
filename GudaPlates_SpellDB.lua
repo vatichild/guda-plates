@@ -21,6 +21,13 @@ GudaPlates_SpellDB.DEBUFFS = {
 	["Piercing Howl"] = {[0]=6},
 	["Mortal Strike"] = {[0]=10},
 	["Deep Wounds"] = {[0]=12},
+	["Charge"] = {[0]=1},
+	["Charge Stun"] = {[0]=1},
+	["Intercept"] = {[0]=3},
+	["Intercept Stun"] = {[0]=3},
+	["Challenging Shout"] = {[0]=6},
+	["Demoralizing Roar"] = {[0]=30},
+	["Dazed"] = {[0]=4},
 
 	-- ROGUE
 	["Cheap Shot"] = {[0]=4},
@@ -260,32 +267,16 @@ end
 -- ============================================
 
 function GudaPlates_SpellDB:AddPending(unit, unitlevel, effect, duration)
-	DEFAULT_CHAT_FRAME:AddMessage("|cffff00ff[SpellDB]|r AddPending called: unit=" .. tostring(unit) .. " effect=" .. tostring(effect) .. " duration=" .. tostring(duration))
-	if not unit or not effect then
-		DEFAULT_CHAT_FRAME:AddMessage("|cffff0000[SpellDB]|r AddPending REJECTED: unit or effect is nil")
-		return
-	end
-	if not self.DEBUFFS[effect] then
-		DEFAULT_CHAT_FRAME:AddMessage("|cffff0000[SpellDB]|r AddPending REJECTED: effect '" .. tostring(effect) .. "' not in DEBUFFS table")
-		return
-	end
-	if duration <= 0 then
-		DEFAULT_CHAT_FRAME:AddMessage("|cffff0000[SpellDB]|r AddPending REJECTED: duration <= 0")
-		return
-	end
-	if self.pending[3] then
-		DEFAULT_CHAT_FRAME:AddMessage("|cffff0000[SpellDB]|r AddPending REJECTED: already have pending spell: " .. tostring(self.pending[3]))
-		return
-	end
+	if not unit or not effect then return end
+	if not self.DEBUFFS[effect] then return end
+	if duration <= 0 then return end
+	if self.pending[3] then return end
 
 	-- Try to get GUID for unique identification (SuperWoW)
 	local unitKey = unit
 	if UnitGUID and UnitExists("target") and UnitName("target") == unit then
 		local guid = UnitGUID("target")
-		if guid then
-			unitKey = guid
-			DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[SpellDB]|r Using GUID as key: " .. guid)
-		end
+		if guid then unitKey = guid end
 	end
 
 	self.pending[1] = unitKey
@@ -293,7 +284,6 @@ function GudaPlates_SpellDB:AddPending(unit, unitlevel, effect, duration)
 	self.pending[3] = effect
 	self.pending[4] = duration
 	self.pending[5] = unit  -- Store original name for fallback lookups
-	DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[SpellDB]|r AddPending SUCCESS: " .. effect .. " on " .. unitKey .. " for " .. duration .. "s")
 end
 
 function GudaPlates_SpellDB:RemovePending()
@@ -305,14 +295,9 @@ function GudaPlates_SpellDB:RemovePending()
 end
 
 function GudaPlates_SpellDB:PersistPending(effect)
-	DEFAULT_CHAT_FRAME:AddMessage("|cffff00ff[SpellDB]|r PersistPending called: effect=" .. tostring(effect) .. " pending[3]=" .. tostring(self.pending[3]))
-	if not self.pending[3] then
-		DEFAULT_CHAT_FRAME:AddMessage("|cffff0000[SpellDB]|r PersistPending: no pending spell")
-		return
-	end
+	if not self.pending[3] then return end
 
 	if self.pending[3] == effect or (effect == nil and self.pending[3]) then
-		DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[SpellDB]|r PersistPending: calling AddEffect for " .. tostring(self.pending[3]))
 		-- Store by GUID (pending[1]) for accurate per-mob tracking
 		self:AddEffect(self.pending[1], self.pending[2], self.pending[3], self.pending[4])
 		-- Also store by name (pending[5]) as fallback for non-SuperWoW lookups
@@ -336,11 +321,7 @@ function GudaPlates_SpellDB:RevertLastAction()
 end
 
 function GudaPlates_SpellDB:AddEffect(unit, unitlevel, effect, duration)
-	DEFAULT_CHAT_FRAME:AddMessage("|cffff00ff[SpellDB]|r AddEffect called: unit=" .. tostring(unit) .. " level=" .. tostring(unitlevel) .. " effect=" .. tostring(effect) .. " duration=" .. tostring(duration))
-	if not unit or not effect then
-		DEFAULT_CHAT_FRAME:AddMessage("|cffff0000[SpellDB]|r AddEffect REJECTED: unit or effect is nil")
-		return
-	end
+	if not unit or not effect then return end
 	unitlevel = unitlevel or 0
 
 	-- Initialize tables
@@ -355,7 +336,6 @@ function GudaPlates_SpellDB:AddEffect(unit, unitlevel, effect, duration)
 	self.objects[unit][unitlevel][effect].start_old = self.objects[unit][unitlevel][effect].start
 	self.objects[unit][unitlevel][effect].start = GetTime()
 	self.objects[unit][unitlevel][effect].duration = duration or self:GetDuration(effect)
-	DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[SpellDB]|r AddEffect SUCCESS: objects[" .. unit .. "][" .. unitlevel .. "][" .. effect .. "] = start:" .. self.objects[unit][unitlevel][effect].start .. " duration:" .. self.objects[unit][unitlevel][effect].duration)
 end
 
 function GudaPlates_SpellDB:UpdateDuration(unit, unitlevel, effect, duration)
@@ -465,7 +445,6 @@ function GudaPlates_SpellDB:ScanDebuff(unit, index)
 
 	-- Try texture cache first (fastest, works with GUIDs)
 	if texture and self.textureToSpell and self.textureToSpell[texture] then
-		DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[ScanDebuff]|r Cache hit: " .. texture .. " -> " .. self.textureToSpell[texture])
 		return self.textureToSpell[texture]
 	end
 
@@ -473,18 +452,14 @@ function GudaPlates_SpellDB:ScanDebuff(unit, index)
 	-- Convert GUID to "target" if it matches the current target
 	local scanUnit = unit
 	if IsGUID(unit) then
-		-- Try to match with target
 		if UnitExists("target") then
 			local targetGUID = UnitGUID and UnitGUID("target")
 			if targetGUID and targetGUID == unit then
 				scanUnit = "target"
 			else
-				-- Can't scan this GUID, no cache hit
-				DEFAULT_CHAT_FRAME:AddMessage("|cffff0000[ScanDebuff]|r GUID mismatch, no cache for: " .. tostring(texture))
 				return nil
 			end
 		else
-			DEFAULT_CHAT_FRAME:AddMessage("|cffff0000[ScanDebuff]|r No target, no cache for: " .. tostring(texture))
 			return nil
 		end
 	end
@@ -495,7 +470,6 @@ function GudaPlates_SpellDB:ScanDebuff(unit, index)
 	local textLeft = getglobal("GudaPlatesDebuffScannerTextLeft1")
 	if textLeft then
 		local effect = textLeft:GetText()
-		DEFAULT_CHAT_FRAME:AddMessage("|cffff00ff[ScanDebuff]|r Tooltip: " .. tostring(effect))
 		-- Cache texture -> spell mapping for future lookups
 		if effect and effect ~= "" and texture then
 			self.textureToSpell[texture] = effect
@@ -512,9 +486,6 @@ function GudaPlates_SpellDB:ScanAction(slot)
 	if not actionTexture then return nil, nil end
 
 	-- Search through spellbook to find matching texture
-	local bookTypes = { "spell", "BOOKTYPE_SPELL" }
-
-	-- Get number of spells
 	local i = 1
 	while true do
 		local spellName, spellRank = GetSpellName(i, "spell")
@@ -522,7 +493,6 @@ function GudaPlates_SpellDB:ScanAction(slot)
 
 		local spellTexture = GetSpellTexture(i, "spell")
 		if spellTexture and spellTexture == actionTexture then
-			DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[ScanAction]|r Found spell: " .. spellName .. " (" .. tostring(spellRank) .. ") texture match!")
 			return spellName, spellRank
 		end
 		i = i + 1
@@ -539,7 +509,6 @@ function GudaPlates_SpellDB:ScanAction(slot)
 	local effect = textLeft and textLeft:GetText() or nil
 	local rank = textRight and textRight:GetText() or nil
 
-	DEFAULT_CHAT_FRAME:AddMessage("|cffff00ff[ScanAction]|r Fallback tooltip: effect='" .. tostring(effect) .. "' rank='" .. tostring(rank) .. "'")
 	return effect, rank
 end
 
@@ -547,9 +516,3 @@ end
 -- INITIALIZATION
 -- ============================================
 _G["GudaPlates_SpellDB"] = GudaPlates_SpellDB
-
-if DEFAULT_CHAT_FRAME then
-	local count = 0
-	for _ in pairs(GudaPlates_SpellDB.DEBUFFS) do count = count + 1 end
-	DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[GudaPlates]|r SpellDB loaded with " .. count .. " spells")
-end
