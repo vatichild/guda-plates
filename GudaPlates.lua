@@ -32,6 +32,9 @@ local debuffTracker = {}
 -- This prevents timer reset every frame
 local debuffTimers = {}
 
+-- Cast tracking database (keyed by GUID when SuperWoW, or by name otherwise)
+local castDB = {}
+
 -- Cast tracking for non-SuperWoW
 local castTracker = {}
 
@@ -236,6 +239,7 @@ GudaPlates:RegisterEvent("PLAYER_ENTERING_WORLD")
 GudaPlates:RegisterEvent("CHAT_MSG_SPELL_HOSTILEPLAYER_DAMAGE")
 GudaPlates:RegisterEvent("CHAT_MSG_SPELL_CREATURE_VS_CREATURE_DAMAGE")
 GudaPlates:RegisterEvent("CHAT_MSG_SPELL_CREATURE_VS_PARTY_DAMAGE")
+GudaPlates:RegisterEvent("CHAT_MSG_SPELL_CREATURE_VS_SELF_DAMAGE")
 GudaPlates:RegisterEvent("CHAT_MSG_SPELL_HOSTILEPLAYER_BUFF")
 GudaPlates:RegisterEvent("CHAT_MSG_SPELL_CREATURE_VS_CREATURE_BUFF")
 GudaPlates:RegisterEvent("CHAT_MSG_SPELL_SELF_DAMAGE")
@@ -243,6 +247,10 @@ GudaPlates:RegisterEvent("CHAT_MSG_SPELL_TRADESKILLS")
 GudaPlates:RegisterEvent("CHAT_MSG_SPELL_PERIODIC_CREATURE_DAMAGE")
 GudaPlates:RegisterEvent("CHAT_MSG_SPELL_PERIODIC_HOSTILEPLAYER_DAMAGE")
 GudaPlates:RegisterEvent("CHAT_MSG_SPELL_AURA_GONE_OTHER")
+GudaPlates:RegisterEvent("CHAT_MSG_SPELL_CREATURE_VS_PARTY_BUFF")
+GudaPlates:RegisterEvent("CHAT_MSG_SPELL_CREATURE_VS_SELF_BUFF")
+-- SuperWoW cast event (provides exact GUID of caster)
+GudaPlates:RegisterEvent("UNIT_CASTEVENT")
 -- ShaguPlates-style events for debuff tracking
 GudaPlates:RegisterEvent("SPELLCAST_STOP")
 GudaPlates:RegisterEvent("CHAT_MSG_SPELL_FAILED_LOCALPLAYER")
@@ -959,8 +967,22 @@ local function UpdateNamePlate(frame)
 
     -- Update Cast Bar
     local casting = nil
-    if superwow_active and hasValidGUID then
-    -- Try UnitCastingInfo/UnitChannelInfo first (SuperWoW 1.5+)
+    local now = GetTime()
+
+    -- Method 1: Check castDB by GUID (SuperWoW UNIT_CASTEVENT - most accurate)
+    if hasValidGUID and castDB[unitstr] then
+        local cast = castDB[unitstr]
+        -- Check if cast is still active
+        if cast.startTime + (cast.duration / 1000) > now then
+            casting = cast
+        else
+            -- Expired, clean up
+            castDB[unitstr] = nil
+        end
+    end
+
+    -- Method 2: Try UnitCastingInfo/UnitChannelInfo (SuperWoW 1.5+)
+    if not casting and superwow_active and hasValidGUID then
         if UnitCastingInfo then
             local spell, nameSubtext, text, texture, startTime, endTime, isTradeSkill = UnitCastingInfo(unitstr)
             if spell then
@@ -984,46 +1006,23 @@ local function UpdateNamePlate(frame)
                 }
             end
         end
-
-        if not casting and SpellInfo then
-        -- Fallback to SpellInfo
-            casting = SpellInfo(unitstr)
-            if not casting and plateName then
-                casting = SpellInfo(plateName)
-            end
-        end
     end
 
-    -- Fallback to castTracker (combat log based) if SuperWoW methods didn't find a cast
-    if not casting and plateName and castTracker[plateName] then
-    -- Fallback: handle multiple same-named mobs
-        local now = GetTime()
-        local myID = tostring(frame)
-
-        -- Find a suitable cast for this plate
-        for i, cast in ipairs(castTracker[plateName]) do
-        -- Check if cast expired
+    -- Method 3: Fallback to castTracker (combat log based, name-based)
+    -- Only used when SuperWoW GUID-based methods didn't find a cast
+    if not casting and plateName and castTracker[plateName] and not hasValidGUID then
+        -- Clean up expired casts first
+        local i = 1
+        while i <= table.getn(castTracker[plateName]) do
+            local cast = castTracker[plateName][i]
             if now > cast.startTime + (cast.duration / 1000) then
                 table.remove(castTracker[plateName], i)
             else
-            -- Try to match by ID if possible
-                local isMatch = false
-                if cast.targetID == myID then
-                    isMatch = true
-                elseif not cast.targetID and (isTarget or isAttackingPlayer or (twthreat_active and threatPct > 0) or hasAggroGlow) then
-                -- If no specific ID assigned, and this mob is in combat, it's a candidate
-                -- We check if another plate already "claimed" this cast this frame
-                    if not cast.claimedBy or cast.claimedBy == myID or (now - (cast.lastClaimTime or 0) > 0.1) then
-                        isMatch = true
-                    end
-                end
-
-                if isMatch then
+                -- Use first valid cast for this name
+                if not casting then
                     casting = cast
-                    cast.claimedBy = myID
-                    cast.lastClaimTime = now
-                    break
                 end
+                i = i + 1
             end
         end
     end
@@ -1477,11 +1476,93 @@ local function cmatch(str, pattern)
     return nil
 end
 
+
+-- Cast icons lookup table
+local castIcons = {
+    ["Fireball"] = "Interface\\Icons\\Spell_Fire_FlameBolt",
+    ["Frostbolt"] = "Interface\\Icons\\Spell_Frost_FrostBolt02",
+    ["Shadow Bolt"] = "Interface\\Icons\\Spell_Shadow_ShadowBolt",
+    ["Greater Heal"] = "Interface\\Icons\\Spell_Holy_GreaterHeal",
+    ["Flash Heal"] = "Interface\\Icons\\Spell_Holy_FlashHeal",
+    ["Lightning Bolt"] = "Interface\\Icons\\Spell_Nature_Lightning",
+    ["Chain Lightning"] = "Interface\\Icons\\Spell_Nature_ChainLightning",
+    ["Earthbind Totem"] = "Interface\\Icons\\Spell_Nature_StrengthOfEarthTotem02",
+    ["Healing Wave"] = "Interface\\Icons\\Spell_Nature_MagicImmunity",
+    ["Fear"] = "Interface\\Icons\\Spell_Shadow_Possession",
+    ["Polymorph"] = "Interface\\Icons\\Spell_Nature_Polymorph",
+    ["Scorching Totem"] = "Interface\\Icons\\Spell_Fire_ScorchingTotem",
+    ["Slowing Poison"] = "Interface\\Icons\\Ability_PoisonSting",
+    ["Web"] = "Interface\\Icons\\Ability_Ensnare",
+    ["Cursed Blood"] = "Interface\\Icons\\Spell_Shadow_RitualOfSacrifice",
+    ["Shrink"] = "Interface\\Icons\\Spell_Shadow_AntiShadow",
+    ["Shadow Weaving"] = "Interface\\Icons\\Spell_Shadow_BlackPlague",
+    ["Smite"] = "Interface\\Icons\\Spell_Holy_HolySmite",
+    ["Mind Blast"] = "Interface\\Icons\\Spell_Shadow_UnholyFrenzy",
+    ["Holy Light"] = "Interface\\Icons\\Spell_Holy_HolyLight",
+    ["Starfire"] = "Interface\\Icons\\Spell_Arcane_StarFire",
+    ["Wrath"] = "Interface\\Icons\\Spell_Nature_AbolishMagic",
+    ["Entangling Roots"] = "Interface\\Icons\\Spell_Nature_StrangleVines",
+    ["Moonfire"] = "Interface\\Icons\\Spell_Nature_StarFall",
+    ["Regrowth"] = "Interface\\Icons\\Spell_Nature_ResistNature",
+    ["Rejuvenation"] = "Interface\\Icons\\Spell_Nature_Rejuvenation",
+}
+
+-- Helper function to parse cast starts from combat log
+local function ParseCastStart(msg)
+    if not msg then return end
+
+    local unit, spell = nil, nil
+
+    -- Try "begins to cast"
+    for u, s in string.gfind(msg, "(.+) begins to cast (.+)%.") do
+        unit, spell = u, s
+    end
+
+    -- Try "begins to perform"
+    if not unit then
+        for u, s in string.gfind(msg, "(.+) begins to perform (.+)%.") do
+            unit, spell = u, s
+        end
+    end
+
+    if unit and spell then
+        local duration = 2000 -- Default 2 seconds
+
+        if not castTracker[unit] then castTracker[unit] = {} end
+
+        local newCast = {
+            spell = spell,
+            startTime = GetTime(),
+            duration = duration,
+            icon = castIcons[spell],
+        }
+
+        table.insert(castTracker[unit], newCast)
+    end
+
+    -- Check for interrupts/failures
+    local interruptedUnit = nil
+    for u in string.gfind(msg, "(.+)'s .+ is interrupted%.") do interruptedUnit = u end
+    if not interruptedUnit then
+        for u in string.gfind(msg, "(.+)'s .+ fails%.") do interruptedUnit = u end
+    end
+
+    if interruptedUnit and castTracker[interruptedUnit] then
+        table.remove(castTracker[interruptedUnit], 1)
+    end
+end
+
 GudaPlates:SetScript("OnEvent", function()
+    -- Parse cast starts for ALL combat log events first
+    if arg1 and string.find(event, "CHAT_MSG_SPELL") then
+        ParseCastStart(arg1)
+    end
+
     if event == "PLAYER_ENTERING_WORLD" then
     -- Clear trackers on zone/load
         debuffTracker = {}
         castTracker = {}
+        castDB = {}
         if SpellDB then SpellDB.objects = {} end
         Print("Initialized. Scanning...")
         if twthreat_active then
@@ -1491,6 +1572,48 @@ GudaPlates:SetScript("OnEvent", function()
             Print("SuperWoW detected - GUID targeting enabled")
             if showDebuffTimers then
                 Print("Debuff countdowns enabled")
+            end
+        end
+
+    -- SuperWoW UNIT_CASTEVENT handler (ShaguPlates-style)
+    -- This provides exact GUID of caster for accurate per-mob cast tracking
+    elseif event == "UNIT_CASTEVENT" then
+        local guid = arg1      -- GUID of the caster
+        local target = arg2    -- target GUID (can be empty)
+        local eventType = arg3 -- "START", "CAST", "CHANNEL", "FAIL"
+        local spellId = arg4   -- spell ID
+        local timer = arg5     -- duration in milliseconds
+
+        if eventType == "START" or eventType == "CAST" or eventType == "CHANNEL" then
+            -- Get spell info from SpellInfo if available
+            local spell, icon
+            if SpellInfo and spellId then
+                spell, _, icon = SpellInfo(spellId)
+            end
+
+            -- Fallback values
+            spell = spell or "Casting"
+            icon = icon or "Interface\\Icons\\INV_Misc_QuestionMark"
+
+            -- Skip buff procs during cast (same logic as ShaguPlates)
+            if eventType == "CAST" then
+                if castDB[guid] and castDB[guid].spell ~= spell then
+                    return
+                end
+            end
+
+            -- Store cast by GUID
+            castDB[guid] = {
+                spell = spell,
+                startTime = GetTime(),
+                duration = timer or 2000,
+                icon = icon,
+                channel = (eventType == "CHANNEL")
+            }
+        elseif eventType == "FAIL" then
+            -- Remove cast entry for this GUID
+            if castDB[guid] then
+                castDB[guid] = nil
             end
         end
 
@@ -1551,99 +1674,6 @@ GudaPlates:SetScript("OnEvent", function()
         end
 
     elseif arg1 then
-    -- Combat log spell tracking (works as primary for non-SuperWoW or fallback for SuperWoW)
-    -- Pattern: "Unit begins to cast Spell." or "Unit begins to perform Spell."
-        local unit, spell = nil, nil
-
-        -- Try "begins to cast"
-        for u, s in string.gfind(arg1, "(.+) begins to cast (.+)%.") do
-            unit, spell = u, s
-        end
-
-        -- Try "begins to perform"
-        if not unit then
-            for u, s in string.gfind(arg1, "(.+) begins to perform (.+)%.") do
-                unit, spell = u, s
-            end
-        end
-
-        if unit and spell then
-        -- We don't have duration easily in Vanilla without a database
-        -- But we can assume some default or use a small library if we had one
-        -- For now, let's use a 2s default or try to find it if we can
-        -- Many mob spells are around 2-3 seconds
-            local duration = 2000
-
-            local castIcons = {
-                ["Fireball"] = "Interface\\Icons\\Spell_Fire_FlameBolt",
-                ["Frostbolt"] = "Interface\\Icons\\Spell_Frost_FrostBolt02",
-                ["Shadow Bolt"] = "Interface\\Icons\\Spell_Shadow_ShadowBolt",
-                ["Greater Heal"] = "Interface\\Icons\\Spell_Holy_GreaterHeal",
-                ["Flash Heal"] = "Interface\\Icons\\Spell_Holy_FlashHeal",
-                ["Lightning Bolt"] = "Interface\\Icons\\Spell_Nature_Lightning",
-                ["Chain Lightning"] = "Interface\\Icons\\Spell_Nature_ChainLightning",
-                ["Earthbind Totem"] = "Interface\\Icons\\Spell_Nature_StrengthOfEarthTotem02",
-                ["Healing Wave"] = "Interface\\Icons\\Spell_Nature_MagicImmunity",
-                ["Fear"] = "Interface\\Icons\\Spell_Shadow_Possession",
-                ["Polymorph"] = "Interface\\Icons\\Spell_Nature_Polymorph",
-                ["Scorching Totem"] = "Interface\\Icons\\Spell_Fire_ScorchingTotem",
-                ["Slowing Poison"] = "Interface\\Icons\\Ability_PoisonSting",
-                ["Web"] = "Interface\\Icons\\Ability_Ensnare",
-                ["Cursed Blood"] = "Interface\\Icons\\Spell_Shadow_RitualOfSacrifice",
-                ["Shrink"] = "Interface\\Icons\\Spell_Shadow_AntiShadow",
-                ["Shadow Weaving"] = "Interface\\Icons\\Spell_Shadow_BlackPlague",
-                ["Smite"] = "Interface\\Icons\\Spell_Holy_HolySmite",
-                ["Mind Blast"] = "Interface\\Icons\\Spell_Shadow_UnholyFrenzy",
-                ["Holy Light"] = "Interface\\Icons\\Spell_Holy_HolyLight",
-                ["Starfire"] = "Interface\\Icons\\Spell_Arcane_StarFire",
-                ["Wrath"] = "Interface\\Icons\\Spell_Nature_AbolishMagic",
-                ["Entangling Roots"] = "Interface\\Icons\\Spell_Nature_StrangleVines",
-                ["Moonfire"] = "Interface\\Icons\\Spell_Nature_StarFall",
-                ["Regrowth"] = "Interface\\Icons\\Spell_Nature_ResistNature",
-                ["Rejuvenation"] = "Interface\\Icons\\Spell_Nature_Rejuvenation",
-            }
-
-            -- Store multiple casts per name to support same-named mobs
-            if not castTracker[unit] then castTracker[unit] = {} end
-
-            -- If we have a target with this name, assume it's the one casting
-            local targetID = nil
-            if UnitExists("target") and UnitName("target") == unit then
-            -- Find the nameplate for the target
-                for plate, nameplate in pairs(registry) do
-                    if plate:IsShown() and plate:GetAlpha() == 1 then
-                        targetID = tostring(plate)
-                        break
-                    end
-                end
-            end
-
-            -- Create cast entry
-            local newCast = {
-                spell = spell,
-                startTime = GetTime(),
-                duration = duration,
-                icon = castIcons[spell],
-                targetID = targetID -- If we identified a specific plate
-            }
-
-            -- Add to list of active casts for this name
-            table.insert(castTracker[unit], newCast)
-        end
-
-        -- Check for interrupts/failures
-        -- Pattern: "Unit's Spell is interrupted." or "Unit's Spell fails."
-        local interruptedUnit = nil
-        for u in string.gfind(arg1, "(.+)'s .+ is interrupted%.") do interruptedUnit = u end
-        if not interruptedUnit then
-            for u in string.gfind(arg1, "(.+)'s .+ fails%.") do interruptedUnit = u end
-        end
-
-        if interruptedUnit and castTracker[interruptedUnit] then
-        -- Remove the oldest cast for this unit (or try to match spell if we had it in the log message)
-            table.remove(castTracker[interruptedUnit], 1)
-        end
-
         -- Debuff tracking using SpellDB (ShaguPlates-style)
         -- Pattern: "Unit is afflicted by Spell." or "Unit is afflicted by Spell (Rank X)."
         for unit, rawSpell in string.gfind(arg1, "(.+) is afflicted by (.+)%.") do
