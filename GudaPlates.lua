@@ -2465,6 +2465,7 @@ resetButton:SetScript("OnClick", function()
     THREAT_COLORS.DPS.HIGH_THREAT = {1.0, 0.6, 0.0, 1}
     THREAT_COLORS.DPS.NO_AGGRO = {0.85, 0.2, 0.2, 1}
     THREAT_COLORS.TANK.AGGRO = {0.41, 0.35, 0.76, 1}
+    THREAT_COLORS.TANK.OTHER_TANK = {0.6, 0.8, 1.0, 1}
     THREAT_COLORS.TANK.LOSING_AGGRO = {1.0, 0.6, 0.0, 1}
     THREAT_COLORS.TANK.NO_AGGRO = {0.85, 0.2, 0.2, 1}
     healthbarHeight = 14
