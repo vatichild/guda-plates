@@ -2,7 +2,7 @@
 ## Title: GudaPlates
 ## Notes: Nameplates addon for World of Warcraft 1.12.1 (Turtle WoW)
 ## Author: Vati
-## Version: 0.0.2
+## Version: 0.0.5
 ## SavedVariables: GudaPlatesDB
 
 GudaPlates_SpellDB.lua

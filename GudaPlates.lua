@@ -47,7 +47,7 @@ local nameplateOverlap = false
 
 -- Healthbar dimensions
 local healthbarHeight = 14
-local healthbarWidth = 110
+local healthbarWidth = 115
 
 -- Font sizes
 local healthFontSize = 10
@@ -2352,7 +2352,7 @@ resetButton:SetScript("OnClick", function()
     THREAT_COLORS.TANK.LOSING_AGGRO = {1.0, 0.6, 0.0, 1}
     THREAT_COLORS.TANK.NO_AGGRO = {0.85, 0.2, 0.2, 1}
     healthbarHeight = 14
-    healthbarWidth = 110
+    healthbarWidth = 115
     healthFontSize = 10
     levelFontSize = 10
     nameFontSize = 10
