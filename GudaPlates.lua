@@ -21,7 +21,7 @@ local registry = {}
 local REGION_ORDER = { "border", "glow", "name", "level", "levelicon", "raidicon" }
 -- Track combat state per nameplate frame to avoid issues with same-named mobs
 local superwow_active = (SpellInfo ~= nil) or (UnitGUID ~= nil) or (SUPERWOW_VERSION ~= nil) -- SuperWoW detection
-local twthreat_active = UnitThreat ~= nil -- TurtleWoW TWThreat detection
+local twthreat_active = UnitThreat ~= nil -- TWThreat detection
 
 -- Debuff settings
 local MAX_DEBUFFS = 16
@@ -46,7 +46,7 @@ local playerRole = "DPS"
 local minimapAngle = 220
 
 -- Nameplate overlap setting: true = overlapping, false = stacking (default)
-local nameplateOverlap = false
+local nameplateOverlap = true
 
 -- Healthbar dimensions
 local healthbarHeight = 14
